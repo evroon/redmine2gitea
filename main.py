@@ -12,7 +12,6 @@ load_dotenv()
 
 REDMINE_DOMAIN = os.getenv('REDMINE_DOMAIN')
 REDMINE_API_TOKEN = os.getenv('REDMINE_API_TOKEN')
-REDMINE_PROJECT_NAME = os.getenv('REDMINE_PROJECT_NAME')
 REDMINE_HEADERS = {
     'accept': 'application/json',
     'X-Redmine-API-Key': REDMINE_API_TOKEN,
@@ -260,17 +259,6 @@ def add_comment(gitea_repo: str, issue_id: int, body: str, user: str) -> None:
         data=json.dumps(data)
     )
 
-    # Try again without sudo.
-    if response.status_code == 404:
-        data['body'] += f'\n*Added by user: {user}*'
-        url = f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues/{issue_id}/comments'
-
-        response = requests.post(
-            url,
-            headers=GITEA_HEADERS,
-            data=json.dumps(data)
-        )
-
     if not response.ok:
         print(response.content)
         raise SystemExit()
@@ -331,7 +319,7 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
 *Imported from Redmine*
 | Property      | Value             |
 | ---           | ---               |
-| Originele ID  | {id}              |
+| Original ID   | {id}              |
 | Created On    | {created_on}      |
 | Priority      | {priority}        |
 | Status        | {status}          |
@@ -477,7 +465,12 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
                 else:
                     detail_text.append(f'*`{property_name}` changed from {prefix_old}{old_value}{unit} to {prefix_new}{new_value}{unit}*')
 
-        body = notes + ('\n***\n' if len(notes) > 0 and len(detail_text) > 0 else '') + '\n'.join(detail_text) + f'\n\n*Date: {created_on}*'
+        body = ''
+        if notes is not None and len(notes) > 0:
+            body = notes + ('\n***\n' if len(detail_text) > 0 else '')
+
+        body += '\n'.join(detail_text) + f'\n\n*Date: {created_on}*'
+
         add_comment(gitea_repo, gitea_issue_id, body, user)
 
 
