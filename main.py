@@ -54,7 +54,7 @@ def process_issues() -> None:
     projects = get_projects()
     users = get_users()
 
-    for issue in issues[::-1]:
+    for issue in issues:
         create_issue(issue, projects, users)
 
 
