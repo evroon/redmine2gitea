@@ -344,7 +344,9 @@ def create_issue(issue: dict, labels: dict, projects: dict, users: dict) -> None
 
             if not property_name.isnumeric():
                 if property_name in ['subject', 'description']:
-                    detail_text.append(f'`{property_name}` changed from:\n> {prefix_old}{old_value}{unit}\n\nto:\n\n> {prefix_new}{new_value}{unit}')
+                    old_value = old_value.replace('\n', '\n> ')
+                    new_value = new_value.replace('\n', '\n> ')
+                    detail_text.append(f'`{property_name}` changed from:\n> {prefix_old}{old_value}{unit}\n\nto:\n\n> {prefix_new}{new_value}{unit}\n')
                 else:
                     detail_text.append(f'*`{property_name}` changed from {prefix_old}{old_value}{unit} to {prefix_new}{new_value}{unit}*')
 
