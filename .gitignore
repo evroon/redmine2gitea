@@ -1,2 +1,4 @@
 .env
+
 issues.json
+map_redmine_to_gitea.json

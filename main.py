@@ -32,6 +32,7 @@ ORGANIZATION = os.getenv('ORGANIZATION')
 
 labels: Dict = {}
 comments_to_update = []
+map_redmine_to_gitea = {}
 
 
 def get_gitea_repo(redmine_project_name: str) -> str:
@@ -45,17 +46,35 @@ def get_gitea_repo(redmine_project_name: str) -> str:
     return f'{ORGANIZATION}/{project_name}'
 
 
-def get_gitea_endpoint(gitea_repo: str) -> str:
-    return f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues'
-
-
 def process_issues() -> None:
     issues = get_issues()
     projects = get_projects()
     users = get_users()
 
-    for issue in issues:
-        create_issue(issue, projects, users)
+    try:
+        for issue in issues:
+            create_issue(issue, projects, users)
+    finally:
+        with open('map_redmine_to_gitea.json', 'w') as f:
+            json.dump(map_redmine_to_gitea, f, sort_keys=True, indent=4)
+
+    update_comments()
+
+
+def update_comments() -> None:
+    for comment in comments_to_update:
+        content = comment['content']
+
+        for match in comment['matches']:
+            issue_id = int(match[1:])
+
+            if issue_id in map_redmine_to_gitea:
+                gitea_id = map_redmine_to_gitea[issue_id]
+                content = content.replace(match, f'#{gitea_id} (redmine id: {issue_id})')
+            else:
+                print(f'Error: Could not find gitea issue id for redmine issue #{issue_id}.')
+
+        edit_comment_body(comment['gitea_repo'], comment['issue_id'], comment['comment_id'], content)
 
 
 def get_users() -> dict:
@@ -192,17 +211,34 @@ def add_labels(gitea_repo: str, issue_id: int, labels: list, user: str) -> List:
     return [x['id'] for x in json.loads(response.content)]
 
 
-def check_for_references(content: str, gitea_repo: str, comment_id: str) -> None:
+def check_for_references(content: str, gitea_repo: str, issue_id: int, comment_id: str) -> None:
     matches = re.findall('(#[0-9]+)', content)
     if matches is not None and len(matches) > 0:
         comments_to_update.append({
             'gitea_repo': gitea_repo,
+            'issue_id': issue_id,
             'comment_id': comment_id,
             'content': content,
             'matches': matches,
         })
 
-        print(f'\tFound {len(matches)} issue reference(s) in repo {gitea_repo} with comment id {comment_id}.')
+        print(f'\tFound {len(matches)} issue reference(s) in repo {gitea_repo} for issue {issue_id} with comment id {comment_id}.')
+
+def edit_comment_body(gitea_repo: str, issue_id: int, comment_id: int, body: str):
+    data = {
+        'body': body
+    }
+    if comment_id == 'body':
+        url = f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues/{issue_id}'
+    else:
+        url = f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues/comments/{comment_id}'
+
+    response = requests.patch(
+        url,
+        headers=GITEA_HEADERS,
+        data=json.dumps(data)
+    )
+
 
 
 def add_comment(gitea_repo: str, issue_id: int, body: str, user: str) -> None:
@@ -235,12 +271,11 @@ def add_comment(gitea_repo: str, issue_id: int, body: str, user: str) -> None:
             data=json.dumps(data)
         )
 
-
     if not response.ok:
         print(response.content)
         raise SystemExit()
 
-    check_for_references(body, gitea_repo, response.json()['id'])
+    check_for_references(body, gitea_repo, issue_id, response.json()['id'])
 
 
 def get_username(users: dict, id: int) -> str:
@@ -330,7 +365,7 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
         data['labels'].append(labels['wontfix'])
 
     data['labels'].sort()
-    endpoint = get_gitea_endpoint(gitea_repo)
+    endpoint = f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues'
 
     response = requests.post(
         f'{endpoint}?sudo={author_username}',
@@ -353,11 +388,13 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
         print(data)
         raise SystemExit()
 
-    check_for_references(description, gitea_repo, 'description')
 
     response_json = json.loads(response.content)
     gitea_issue_id = response_json['number']
     comments = get_comments(id)
+    map_redmine_to_gitea[int(id)] = gitea_issue_id
+
+    check_for_references(description, gitea_repo, gitea_issue_id, 'body')
 
     if 'labels' in response_json:
         gitea_labels = [x['id'] for x in response_json['labels']]
