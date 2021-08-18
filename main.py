@@ -32,6 +32,17 @@ ORGANIZATION = os.getenv('ORGANIZATION')
 labels: Dict = {}
 comments_to_update = []
 map_redmine_to_gitea = {}
+relation_types = [
+    'blocks',
+    'blocked',
+    'precedes',
+    'follows',
+    'relates',
+    'duplicates',
+    'duplicated',
+    'copied_to',
+    'copied_from',
+]
 
 
 def get_gitea_repo(redmine_project_name: str) -> str:
@@ -431,7 +442,7 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
 
             if property_name == 'done_ratio':
                 unit = '%'
-            elif property_name in ['blocked', 'precedes', 'relates']:
+            elif property_name in relation_types:
                 if old_value is not None:
                     prefix_old = '#'
                 if new_value is not None:
