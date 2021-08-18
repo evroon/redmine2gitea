@@ -472,6 +472,9 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
 
         body += '\n'.join(detail_text) + f'\n\n*Date: {created_on}*'
 
+        if user == DEFAULT_USERNAME:
+            body += f'\n*User: {comment["user"]["name"]}*'
+
         add_comment(gitea_repo, gitea_issue_id, body, user)
 
 
