@@ -392,6 +392,7 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
             print(f'\tCreated labels ({gitea_labels}) do not match expected labels ({data["labels"]}) for gitea issue {gitea_issue_id}, retrying...')
             time.sleep(0.5)
             gitea_labels = add_labels(gitea_repo, gitea_issue_id, data['labels'], author_username)
+            gitea_labels.sort()
 
     map_status = {
         1: 'New',
