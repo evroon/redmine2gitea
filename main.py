@@ -269,9 +269,18 @@ def add_comment(gitea_repo: str, issue_id: int, body: str, user: str) -> None:
         headers=GITEA_HEADERS,
         data=json.dumps(data)
     )
+    if response.status_code == 404:
+        data['body'] += f'\n*User: {user}*'
+        url = f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues/{issue_id}/comments?sudo={DEFAULT_USERNAME}'
+
+        response = requests.post(
+            url,
+            headers=GITEA_HEADERS,
+            data=json.dumps(data)
+        )
 
     if not response.ok:
-        print(response.content)
+        print('Error while adding comment:', response.content)
         raise SystemExit()
 
     check_for_references(body, gitea_repo, issue_id, response.json()['id'])
@@ -378,6 +387,14 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
 
         response = requests.post(
             f'{endpoint}?sudo={author_username}',
+            headers=GITEA_HEADERS,
+            data=json.dumps(data)
+        )
+
+    if response.status_code in [404, 422]:
+        print(f'\tCould not create issue as user: {author_username}, retrying as default user...')
+        response = requests.post(
+            f'{endpoint}?sudo={DEFAULT_USERNAME}',
             headers=GITEA_HEADERS,
             data=json.dumps(data)
         )
