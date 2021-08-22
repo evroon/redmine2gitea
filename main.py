@@ -65,26 +65,134 @@ def process_issues() -> None:
         for issue in issues:
             create_issue(issue, projects, users)
     finally:
+        with open('comments_to_update.json', 'w') as f:
+            json.dump(comments_to_update, f, sort_keys=True, indent=4)
+
         with open('map_redmine_to_gitea.json', 'w') as f:
             json.dump(map_redmine_to_gitea, f, sort_keys=True, indent=4)
 
     update_comments()
 
 
+def unwatch_repos() -> None:
+    """Unwatch every repo for every user."""
+    users = get_users_gitea()
+    response = requests.get(f'{GITEA_DOMAIN}/api/v1/orgs/{ORGANIZATION}/repos?limit=50', headers=GITEA_HEADERS)
+    repos = response.json()
+
+    for user_id in users:
+        for repo in repos:
+            user = users[user_id]
+            repo_name = repo["full_name"]
+            username = user['username']
+
+            url = f'{GITEA_DOMAIN}/api/v1/repos/{repo_name}/subscription?sudo={username}'
+            response = requests.delete(url, headers=GITEA_HEADERS)
+            print(response, url)
+
+
+def map_issues():
+    """Map issues from Redmine to Gitea after creating them."""
+    i = 0
+    limit = 50
+
+    while True:
+        response = requests.get(f'{GITEA_DOMAIN}/api/v1/repos/issues/search?state=all&limit={limit}&page={i}', headers=GITEA_HEADERS)
+        issues = response.json()
+
+        for issue in issues:
+            if 'pull' in issue['html_url']:
+                continue
+
+            regex = re.findall('[|] Original ID   [|] ([0-9]+)[ ]+[|]', issue['body'])
+            if len(regex) < 1:
+                print(f'Issue is invalid: {issue["html_url"]}')
+                continue
+
+            id = int(regex[0])
+
+            index = issue['id']
+            number = issue['number']
+            repo = issue['repository']['name']
+            repo_path = issue['repository']['full_name']
+            map_redmine_to_gitea[id] = {
+                'repo': repo,
+                'number': number,
+            }
+
+            check_for_references(issue['body'], repo, number, 'body')
+
+            comments_url = f'{GITEA_DOMAIN}/api/v1/repos/{repo_path}/issues/{number}/comments'
+            comments_response = requests.get(comments_url, headers=GITEA_HEADERS)
+            comments = comments_response.json()
+
+            for comment in comments:
+                check_for_references(comment['body'], repo, number, comment['id'])
+
+        i += 1
+        if len(issues) < limit:
+            break
+
+    with open('map_redmine_to_gitea.json', 'w') as f:
+        json.dump(map_redmine_to_gitea, f, sort_keys=True, indent=4)
+
+    with open('comments_to_update.json', 'w') as f:
+        json.dump(comments_to_update, f, sort_keys=True, indent=4)
+
+
 def update_comments() -> None:
+    """Update references to other issues in issues."""
+    with open('map_redmine_to_gitea.json', 'r') as f:
+        map_redmine_to_gitea = json.load(f)
+
+    with open('comments_to_update.json', 'r') as f:
+        comments_to_update = json.load(f)
+
     for comment in comments_to_update:
         content = comment['content']
 
         for match in comment['matches']:
-            issue_id = int(match[1:])
+            issue_id = match[1:]
 
             if issue_id in map_redmine_to_gitea:
-                gitea_id = map_redmine_to_gitea[issue_id]
-                content = content.replace(match, f'#{gitea_id} (redmine id: {issue_id})')
+                gitea_id = map_redmine_to_gitea[issue_id]['number']
+                ref_repo = map_redmine_to_gitea[issue_id]['repo']
+                issue_repo = comment['gitea_repo']
+                new_ref = '#' + str(gitea_id)
+
+                if issue_repo != ref_repo:
+                    new_ref = f'{ORGANIZATION}/{ref_repo}#{gitea_id}'
+
+                if f'#{issue_id} (redmine id: ' in content:
+                    content.replace('#' + issue_id, new_ref)
+                else:
+                    content = content.replace(match, f'{new_ref} (redmine id: {issue_id})')
             else:
                 print(f'Error: Could not find gitea issue id for redmine issue #{issue_id}.')
 
+        print(comment['gitea_repo'], comment['issue_id'], '\n\t' + comment['content'].replace('\n', '\n\t'), '\n\t\t' + content.replace('\n', '\n\t\t'))
+        print()
         edit_comment_body(comment['gitea_repo'], comment['issue_id'], comment['comment_id'], content)
+
+
+def get_users_gitea() -> dict:
+    """Returns all users as registered in Gitea.
+
+    Returns:
+        dict: Dict of (username, name) pairs for each user id
+    """
+    members_url = f'{GITEA_DOMAIN}/api/v1/orgs/{ORGANIZATION}/members?limit=30&page=2'
+    response = requests.get(members_url, headers=GITEA_HEADERS)
+    print(response)
+    result = {}
+
+    for user in response.json():
+        result[user['id']] = {
+            'username': user['login'],
+            'name': user['full_name'],
+        }
+
+    return result
 
 
 def get_users() -> dict:
@@ -239,16 +347,15 @@ def edit_comment_body(gitea_repo: str, issue_id: int, comment_id: int, body: str
         'body': body
     }
     if comment_id == 'body':
-        url = f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues/{issue_id}'
+        url = f'{GITEA_DOMAIN}/api/v1/repos/{ORGANIZATION}/{gitea_repo}/issues/{issue_id}'
     else:
-        url = f'{GITEA_DOMAIN}/api/v1/repos/{gitea_repo}/issues/comments/{comment_id}'
+        url = f'{GITEA_DOMAIN}/api/v1/repos/{ORGANIZATION}/{gitea_repo}/issues/comments/{comment_id}'
 
     response = requests.patch(
         url,
         headers=GITEA_HEADERS,
         data=json.dumps(data)
     )
-
 
 
 def add_comment(gitea_repo: str, issue_id: int, body: str, user: str) -> None:
@@ -507,4 +614,4 @@ def create_issue(issue: dict, projects: dict, users: dict) -> None:
 
 
 if __name__ == '__main__':
-    process_issues()
+    unwatch_repos()
